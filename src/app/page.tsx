@@ -1,101 +1,197 @@
-import Image from "next/image";
+"use client";
+import React, { useState, useEffect } from 'react';
 
-export default function Home() {
+declare global {
+  interface Window {
+    ethereum: any;
+  }
+}
+import { ethers } from 'ethers';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Wallet } from 'lucide-react';
+import ContractABI from '../constant/abi.json';
+const P2P_SWAP_ADDRESS = process.env.NEXT_PUBLIC_CONTRACT!;
+const P2P_SWAP_ABI = [
+  "function createOrder(address _tokenToSell, address _tokenToBuy, uint256 _amountToSell, uint256 _amountToBuy) external returns (uint256)",
+  "function executeOrder(uint256 _orderId) external",
+  "function cancelOrder(uint256 _orderId) external",
+  "function getOrder(uint256 _orderId) external view returns (tuple(address maker, address tokenToSell, address tokenToBuy, uint256 amountToSell, uint256 amountToBuy, bool isActive))"
+];
+
+const ERC20_ABI = [
+  "function approve(address spender, uint256 amount) external returns (bool)",
+  "function balanceOf(address account) view returns (uint256)"
+];
+
+const P2PSwapApp = () => {
+  console.log(ContractABI);
+  console.log(P2P_SWAP_ADDRESS);
+  const [account, setAccount] = useState('');
+  const [provider, setProvider] = useState(null);
+  const [sellToken, setSellToken] = useState('');
+  const [buyToken, setBuyToken] = useState('');
+  const [sellAmount, setSellAmount] = useState('');
+  const [buyAmount, setBuyAmount] = useState('');
+  const [orderId, setOrderId] = useState('');
+  const [orderDetails, setOrderDetails] = useState(null);
+
+ 
+
+  const connectWallet = async () => {
+    try {
+     
+      if (window.ethereum) {
+        const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+        const provider = new ethers.AlchemyProvider('sepolia', window.ethereum);
+        setProvider(provider);
+        setAccount(accounts[0]);
+      }
+    } catch (error) {
+      console.error('Error connecting wallet:', error);
+    }
+  };
+
+  const createOrder = async () => {
+    try {
+      const signer = provider.getSigner();
+      const swapContract = new ethers.Contract(P2P_SWAP_ADDRESS, P2P_SWAP_ABI, signer);
+      const tokenContract = new ethers.Contract(sellToken, ERC20_ABI, signer);
+
+      // Approve token transfer
+      const approveTx = await tokenContract.approve(P2P_SWAP_ADDRESS, sellAmount);
+      await approveTx.wait();
+
+      // Create order
+      const tx = await swapContract.createOrder(
+        sellToken,
+        buyToken,
+        ethers.utils.parseEther(sellAmount),
+        ethers.utils.parseEther(buyAmount)
+      );
+      await tx.wait();
+    } catch (error) {
+      console.error('Error creating order:', error);
+    }
+  };
+
+  const executeOrder = async () => {
+    try {
+      const signer = provider.getSigner();
+      const swapContract = new ethers.Contract(P2P_SWAP_ADDRESS, P2P_SWAP_ABI, signer);
+      const order = await swapContract.getOrder(orderId);
+      
+      // Approve buy token
+      const buyTokenContract = new ethers.Contract(order.tokenToBuy, ERC20_ABI, signer);
+      const approveTx = await buyTokenContract.approve(P2P_SWAP_ADDRESS, order.amountToBuy);
+      await approveTx.wait();
+
+      // Execute order
+      const tx = await swapContract.executeOrder(orderId);
+      await tx.wait();
+    } catch (error) {
+      console.error('Error executing order:', error);
+    }
+  };
+
+  const fetchOrderDetails = async () => {
+    if (!orderId || !provider) return;
+    try {
+      const swapContract = new ethers.Contract(P2P_SWAP_ADDRESS, P2P_SWAP_ABI, provider);
+      const order = await swapContract.getOrder(orderId);
+      setOrderDetails(order);
+    } catch (error) {
+      console.error('Error fetching order:', error);
+    }
+  };
+
+  useEffect(() => {
+    fetchOrderDetails();
+  }, [orderId, provider]);
+
   return (
-    <div className="grid grid-rows-[20px_1fr_20px] items-center justify-items-center min-h-screen p-8 pb-20 gap-16 sm:p-20 font-[family-name:var(--font-geist-sans)]">
-      <main className="flex flex-col gap-8 row-start-2 items-center sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={180}
-          height={38}
-          priority
-        />
-        <ol className="list-inside list-decimal text-sm text-center sm:text-left font-[family-name:var(--font-geist-mono)]">
-          <li className="mb-2">
-            Get started by editing{" "}
-            <code className="bg-black/[.05] dark:bg-white/[.06] px-1 py-0.5 rounded font-semibold">
-              src/app/page.tsx
-            </code>
-            .
-          </li>
-          <li>Save and see your changes instantly.</li>
-        </ol>
+    <div className="min-h-screen bg-gray-100 p-4">
+      <div className="max-w-2xl mx-auto">
+        <Card>
+          <CardHeader>
+            <div className="flex justify-between items-center">
+              <CardTitle>P2P Token Swap</CardTitle>
+              {!account ? (
+                <Button onClick={connectWallet}>
+                  <Wallet className="mr-2 h-4 w-4" />
+                  Connect Wallet
+                </Button>
+              ) : (
+                <p className="text-sm font-mono">{account.slice(0, 6)}...{account.slice(-4)}</p>
+              )}
+            </div>
+          </CardHeader>
+          <CardContent>
+            {account ? (
+              <Tabs defaultValue="create">
+                <TabsList className="w-full">
+                  <TabsTrigger value="create" className="flex-1">Create Order</TabsTrigger>
+                  <TabsTrigger value="execute" className="flex-1">Execute Order</TabsTrigger>
+                </TabsList>
 
-        <div className="flex gap-4 items-center flex-col sm:flex-row">
-          <a
-            className="rounded-full border border-solid border-transparent transition-colors flex items-center justify-center bg-foreground text-background gap-2 hover:bg-[#383838] dark:hover:bg-[#ccc] text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={20}
-              height={20}
-            />
-            Deploy now
-          </a>
-          <a
-            className="rounded-full border border-solid border-black/[.08] dark:border-white/[.145] transition-colors flex items-center justify-center hover:bg-[#f2f2f2] dark:hover:bg-[#1a1a1a] hover:border-transparent text-sm sm:text-base h-10 sm:h-12 px-4 sm:px-5 sm:min-w-44"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Read our docs
-          </a>
-        </div>
-      </main>
-      <footer className="row-start-3 flex gap-6 flex-wrap items-center justify-center">
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/file.svg"
-            alt="File icon"
-            width={16}
-            height={16}
-          />
-          Learn
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/window.svg"
-            alt="Window icon"
-            width={16}
-            height={16}
-          />
-          Examples
-        </a>
-        <a
-          className="flex items-center gap-2 hover:underline hover:underline-offset-4"
-          href="https://nextjs.org?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-          target="_blank"
-          rel="noopener noreferrer"
-        >
-          <Image
-            aria-hidden
-            src="/globe.svg"
-            alt="Globe icon"
-            width={16}
-            height={16}
-          />
-          Go to nextjs.org →
-        </a>
-      </footer>
+                <TabsContent value="create" className="space-y-4">
+                  <Input
+                    placeholder="Token to Sell Address"
+                    value={sellToken}
+                    onChange={(e) => setSellToken(e.target.value)}
+                  />
+                  <Input
+                    placeholder="Amount to Sell"
+                    type="number"
+                    value={sellAmount}
+                    onChange={(e) => setSellAmount(e.target.value)}
+                  />
+                  <Input
+                    placeholder="Token to Buy Address"
+                    value={buyToken}
+                    onChange={(e) => setBuyToken(e.target.value)}
+                  />
+                  <Input
+                    placeholder="Amount to Buy"
+                    type="number"
+                    value={buyAmount}
+                    onChange={(e) => setBuyAmount(e.target.value)}
+                  />
+                  <Button onClick={createOrder} className="w-full">Create Order</Button>
+                </TabsContent>
+
+                <TabsContent value="execute" className="space-y-4">
+                  <Input
+                    placeholder="Order ID"
+                    value={orderId}
+                    onChange={(e) => setOrderId(e.target.value)}
+                  />
+                  {orderDetails && (
+                    <div className="bg-gray-50 p-4 rounded-lg">
+                      <p className="text-sm text-gray-600">Order Details</p>
+                      <div className="space-y-2 mt-2">
+                        <p>Selling: {ethers.utils.formatEther(orderDetails.amountToSell)} Tokens</p>
+                        <p>For: {ethers.utils.formatEther(orderDetails.amountToBuy)} Tokens</p>
+                        <p>Maker: {orderDetails.maker}</p>
+                        <p>Status: {orderDetails.isActive ? 'Active' : 'Inactive'}</p>
+                      </div>
+                    </div>
+                  )}
+                  <Button onClick={executeOrder} className="w-full">Execute Order</Button>
+                </TabsContent>
+              </Tabs>
+            ) : (
+              <div className="text-center py-8">
+                <p className="text-gray-500">Please connect your wallet to continue</p>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
     </div>
   );
-}
+};
+
+export default P2PSwapApp;
